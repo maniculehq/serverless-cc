@@ -1,17 +1,20 @@
 # serverless-cc
 
-Runs the **extracted Claude Code bundle** on **Vercel Fluid Compute (Bun runtime)**,
-with every shell/file operation routed to **[just-bash](https://www.npmjs.com/package/just-bash)**
-over a persistent **[Archil](https://archil.com)** disk.
+A **Next.js** app (chat UI built with **shadcn/ui** + **Vercel AI Elements**) that drives
+the **extracted Claude Code bundle** on **Vercel Fluid Compute (Bun runtime)**, with every
+shell/file operation routed to **[just-bash](https://www.npmjs.com/package/just-bash)** over
+a persistent **[Archil](https://archil.com)** disk.
 
 ```
-POST /api/agent {prompt}
+Browser UI (app/page.tsx + components/chat.tsx — AI Elements, no AI SDK)
+        │  POST /api/agent {prompt}              ▲  NDJSON event stream
+        ▼                                        │  (text/reasoning deltas, tool calls)
+   app/api/agent/route.ts — App Router handler, runs on the BUN runtime (vercel.json bunVersion)
         │
-        ▼  Vercel Function — Bun runtime, Fluid Compute
    Agent SDK  ──spawns──▶  bin/cli.js (extracted Claude Code)   built-in tools DISABLED
         │                        │
         │  control protocol      ▼ tool calls
-        └───────────────▶ mcp__sandbox__{bash,read_file,write_file,edit_file,ls}
+        └───────────────▶ mcp__workspace__{bash,read_file,write_file,edit_file,ls}
                                  │  (run in the function process)
                                  ▼
                          one just-bash instance
@@ -19,6 +22,14 @@ POST /api/agent {prompt}
                                  ▼
                          DiskFs ──HTTPS──▶ Archil disk (persistent)
 ```
+
+The backend lives **inside Next.js** as an App Router route handler (not a root `/api`
+function — that collides with Next's `/api/*` namespace). It still runs on **Bun** because
+`vercel.json` sets `"bunVersion": "1.x"` globally. The handler streams the run as **NDJSON**
+(one JSON event per line: `text_delta` / `reasoning_delta` / `tool_use` / `tool_result` /
+`result`), and the UI consumes it with a plain `fetch` + `ReadableStream` reader and accumulates
+the deltas — **no Vercel AI SDK / `useChat`** (AI Elements are used purely as presentational
+components; `includePartialMessages: true` gives token-level streaming).
 
 The bundle's own `Bash`/`Read`/`Write`/`Edit`/`Glob`/`Grep` are disabled; the model
 uses custom MCP tools instead, all backed by a single `just-bash` instance whose
@@ -29,14 +40,21 @@ filesystem is the Archil disk (`DiskFs`, via the pure-HTTPS `disk` SDK). If
 
 | Path | Purpose |
 |---|---|
-| `api/agent.mjs` | Vercel Function handler (`GET` health, `POST` run a prompt) |
-| `lib/mcp-tools.mjs` | The `mcp__sandbox__*` tools (bash/read/write/edit/ls) |
+| `app/api/agent/route.ts` | The Bun route handler (`GET` health, `POST` streams a run as NDJSON) |
+| `app/page.tsx` / `app/layout.tsx` | The page shell + header/status pill |
+| `components/chat.tsx` | Chat UI: drives AI Elements with plain React state + a fetch stream reader |
+| `components/status-pill.tsx` | Backend health badge (reads `GET /api/agent`) |
+| `components/ai-elements/*` | Vercel AI Elements (conversation, message, prompt-input, tool, reasoning) |
+| `components/ui/*` | shadcn/ui primitives |
+| `lib/mcp-tools.mjs` | The `mcp__workspace__*` tools (bash/read/write/edit/ls) |
 | `lib/fs-backend.mjs` | One shared `just-bash` instance; `DiskFs` (Archil) or `InMemoryFs` |
 | `lib/disk-fs.mjs` | just-bash `IFileSystem` over the Archil `disk` SDK object ops |
+| `lib/utils.ts` | shadcn `cn()` helper |
 | `bin/cli.js` | The extracted Claude Code bundle (16 MB) |
 | `scripts/extract.py` | Carves `cli.js` out of a Claude Code standalone binary |
-| `vercel.json` | `bunVersion: 1.x`, `fluid: true`, `maxDuration`, `includeFiles` |
-| `local.mjs` | Run the same pipeline from the CLI |
+| `vercel.json` | `bunVersion: 1.x`, `fluid: true` (per-route `maxDuration` is in `route.ts`) |
+| `next.config.ts` | `serverExternalPackages` (SDK) + `outputFileTracingIncludes` (bundles `bin/**`) |
+| `local.mjs` | Run the same agent pipeline from the CLI (no UI) |
 | `deploy.sh` | Deploy via `vc`, passing `.env` secrets as runtime env |
 
 ## Where `bin/cli.js` comes from
@@ -83,9 +101,27 @@ cp .env.example .env   # fill in ARCHIL_* and ANTHROPIC_API_KEY
 
 ## Run locally
 
+Start the Next.js dev server and open the chat UI at http://localhost:3000:
+
+```bash
+bun run dev
+```
+
+Next loads `.env` automatically, so it uses the Archil disk if `ARCHIL_API_KEY` is set.
+To force the self-contained in-memory backend (no Archil, no network), blank that var —
+Next won't override an already-set environment variable:
+
+```bash
+ARCHIL_API_KEY="" bun run dev
+```
+
+Or run the same agent pipeline headless from the CLI (no UI):
+
 ```bash
 bun run local "Create /workspace/notes.md with a TODO list, then read it back."
 ```
+
+Build a production bundle with `bun run build`.
 
 ## Deploy
 
@@ -116,6 +152,6 @@ vc curl https://<deployment>/api/agent -X POST \
   client is **not** used (its rustls build panics on TLS init under any JS runtime).
 - just-bash's `defenseInDepth` is disabled because its `process.env` trap blocks
   the Vercel runtime's fetch instrumentation during `DiskFs` HTTPS calls. The real
-  sandbox is the isolated Archil disk + just-bash's limited command set.
+  isolation is the Archil disk + just-bash's limited command set.
 - The SDK spawns the `bun` runtime by name; the handler symlinks `process.execPath`
   to `/tmp/bin/bun` and prepends it to `PATH` so that resolves inside the function.

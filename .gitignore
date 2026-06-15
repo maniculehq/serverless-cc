@@ -1,6 +1,11 @@
 # dependencies (bun install)
 node_modules
 
+# next.js
+.next/
+/build
+next-env.d.ts
+
 # output
 out
 dist

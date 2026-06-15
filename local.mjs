@@ -4,13 +4,13 @@
 //
 // Drives the extracted Claude Code bundle (bin/cli.js) via the Agent SDK with
 // the built-in shell/file tools disabled; all tool calls route to the custom
-// mcp__sandbox__* tools, backed by one just-bash instance over the Archil disk
+// mcp__workspace__* tools, backed by one just-bash instance over the Archil disk
 // (when ARCHIL_API_KEY is set) or an in-memory fs otherwise.
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { sandboxServer, TOOL_NAMES } from "./lib/mcp-tools.mjs";
+import { workspaceServer, TOOL_NAMES } from "./lib/mcp-tools.mjs";
 import { backendLabel, WORKSPACE, shutdown } from "./lib/fs-backend.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -31,7 +31,7 @@ const q = query({
     executable: "bun",
     pathToClaudeCodeExecutable: CLI,
     cwd: HOST_CWD,
-    mcpServers: { sandbox: sandboxServer },
+    mcpServers: { workspace: workspaceServer },
     allowedTools: TOOL_NAMES,
     disallowedTools: DISABLED,
     permissionMode: "bypassPermissions",
@@ -40,7 +40,7 @@ const q = query({
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      append: `All file and shell operations MUST go through the mcp__sandbox__* tools (bash, read_file, write_file, edit_file, ls). Built-in Bash/Read/Write/Edit are unavailable. Workspace root is ${WORKSPACE}.`,
+      append: `All file and shell operations MUST go through the mcp__workspace__* tools (bash, read_file, write_file, edit_file, ls). Built-in Bash/Read/Write/Edit are unavailable. Workspace root is ${WORKSPACE}.`,
     },
     env: { ...process.env, HOME: HOST_CWD },
     stderr: (d) => { if (process.env.CC_DEBUG) process.stderr.write(d); },
@@ -50,7 +50,7 @@ const q = query({
 try {
   for await (const m of q) {
     if (m.type === "system" && m.subtype === "init") {
-      console.log("INIT model=", m.model, "| mcp tools:", (m.tools || []).filter((t) => t.startsWith("mcp__sandbox__")).join(", "));
+      console.log("INIT model=", m.model, "| mcp tools:", (m.tools || []).filter((t) => t.startsWith("mcp__workspace__")).join(", "));
     } else if (m.type === "assistant") {
       for (const c of m.message.content) {
         if (c.type === "text") console.log("ASSISTANT:", c.text);
