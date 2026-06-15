@@ -25,6 +25,28 @@ export default function Home() {
       <main className="min-h-0 flex-1">
         <Chat />
       </main>
+      <footer className="shrink-0 px-4 py-2 text-right sm:px-7">
+        <p className="font-mono text-[10px] text-muted-foreground/60">
+          Built by{" "}
+          <a
+            className="text-muted-foreground underline-offset-2 transition-colors hover:text-ember hover:underline"
+            href="https://x.com/shreyansj"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Shreyans
+          </a>{" "}
+          @{" "}
+          <a
+            className="text-muted-foreground underline-offset-2 transition-colors hover:text-ember hover:underline"
+            href="https://manicule.dev"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Manicule
+          </a>
+        </p>
+      </footer>
     </div>
   );
 }

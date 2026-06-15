@@ -129,16 +129,11 @@
   }
   body {
     @apply bg-background text-foreground;
-    /* Atmosphere: a faint blueprint grid + a warm ember bloom from the top. */
+    /* Atmosphere: a faint blueprint grid. */
     background-image:
-      radial-gradient(
-        120% 80% at 50% -20%,
-        color-mix(in oklch, var(--ember) 16%, transparent),
-        transparent 60%
-      ),
       linear-gradient(to right, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
       linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px);
-    background-size: 100% 100%, 44px 44px, 44px 44px;
+    background-size: 44px 44px, 44px 44px;
     background-attachment: fixed;
   }
   /* Thin, restrained scrollbars. */

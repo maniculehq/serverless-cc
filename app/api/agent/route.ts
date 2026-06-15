@@ -80,9 +80,7 @@ export function GET() {
   return Response.json({
     ok: true,
     service: "cc-archil",
-    backend: process.env.ARCHIL_API_KEY
-      ? "archil:" + (process.env.ARCHIL_DISK || "")
-      : "in-memory",
+    backend: process.env.ARCHIL_API_KEY ? "archil" : "in-memory",
     cliExists: fs.existsSync(CLI),
     anthropic: !!(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN),
     runtime: bunVersion() ? "bun " + bunVersion() : "node " + process.versions.node,

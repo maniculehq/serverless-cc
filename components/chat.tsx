@@ -290,7 +290,7 @@ export function Chat() {
                       {m.text}
                     </span>
                   ) : m.parts.length === 0 && busy ? (
-                    <Shimmer>Spinning up the workspace…</Shimmer>
+                    <Shimmer>Thinking…</Shimmer>
                   ) : (
                     m.parts.map((p, i) => (
                       <PartView
