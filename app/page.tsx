@@ -4,7 +4,7 @@ import { WarningBanner } from "@/components/warning-banner";
 
 export default function Home() {
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="relative flex h-dvh flex-col">
       <header className="flex shrink-0 items-center justify-between gap-4 border-border/70 border-b px-5 py-3 sm:px-7">
         <div className="flex items-center gap-3">
           <div className="ember-glow flex size-9 items-center justify-center rounded-md border border-ember/40 bg-ember/10 font-mono text-[15px] text-ember">
@@ -25,8 +25,8 @@ export default function Home() {
       <main className="min-h-0 flex-1">
         <Chat />
       </main>
-      <footer className="shrink-0 px-4 py-2 text-right sm:px-7">
-        <p className="font-mono text-[10px] text-muted-foreground/60">
+      <footer className="pointer-events-none absolute right-4 bottom-1.5 z-50 sm:right-7">
+        <p className="pointer-events-auto font-mono text-[10px] text-muted-foreground/60">
           Built by{" "}
           <a
             className="text-muted-foreground underline-offset-2 transition-colors hover:text-ember hover:underline"
