@@ -53,7 +53,11 @@ async function cleanupPrefix(disk, root) {
   const prefix = root.replace(/^\/+/, "") + "/";
   try {
     const all = await disk.listObjects(prefix, { recursive: true });
-    for (const o of all.objects || []) await disk.deleteObject(o.key);
+    // deepest-first so directory markers delete after their children (Archil S3)
+    const keys = (all.objects || [])
+      .map((o) => o.key)
+      .sort((a, b) => b.split("/").length - a.split("/").length || b.length - a.length);
+    for (const k of keys) { try { await disk.deleteObject(k); } catch { /* marker race */ } }
   } catch { /* best effort */ }
 }
 

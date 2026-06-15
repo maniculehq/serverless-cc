@@ -50,8 +50,10 @@ requests. Each `POST` therefore runs in its **own `node:worker_threads` Worker**
   loop, so the `fs-backend`/`mcp-tools` module state is naturally per-request.
 - **Data isolation** — the worker scopes the workspace to a unique prefix
   (`CC_WORKSPACE=/workspace/<reqId>`) before importing `fs-backend`, so concurrent runs on
-  the same Archil disk never collide. Pass `{ "session": "<id>" }` in the POST body to
-  deliberately share/persist a workspace instead.
+  the same Archil disk never collide. A request without a session is **ephemeral**: its
+  prefix is deleted when the run ends, so per-request workspaces don't accumulate on the
+  disk. Pass `{ "session": "<id>" }` in the POST body to deliberately share/persist a
+  workspace instead (those are never GC'd).
 - **Hard cancellation** — on client disconnect or the `maxDuration` deadline the route calls
   `cancel()`, which posts `{__cmd:"abort"}` to the worker; the worker aborts the SDK's
   `AbortController` *from inside the live thread* (stdin-EOF → SIGTERM → SIGKILL), reliably
@@ -73,15 +75,18 @@ exercises both properties (concurrent on-disk isolation + no-orphan cancellation
 | `components/status-pill.tsx` | Backend health badge (reads `GET /api/agent`) |
 | `components/ai-elements/*` | Vercel AI Elements (conversation, message, prompt-input, tool, reasoning) |
 | `components/ui/*` | shadcn/ui primitives |
-| `lib/mcp-tools.mjs` | The `mcp__workspace__*` tools (bash/read/write/edit/ls) |
-| `lib/fs-backend.mjs` | One shared `just-bash` instance; `DiskFs` (Archil) or `InMemoryFs` |
+| `lib/agent-worker.mjs` | The per-request Worker: runs `query()`, scopes the workspace, streams events, cancels + GC's |
+| `lib/agent-runner.mjs` | Main-thread glue: spawns the Worker, abort-then-terminate cancel, concurrency cap |
+| `lib/mcp-tools.mjs` | The `mcp__workspace__*` tools (Bash/Read/Write/Edit/LS — drop-in for the native tools) |
+| `lib/fs-backend.mjs` | The per-worker `just-bash` instance; `DiskFs` (Archil) or `InMemoryFs` |
 | `lib/disk-fs.mjs` | just-bash `IFileSystem` over the Archil `disk` SDK object ops |
 | `lib/utils.ts` | shadcn `cn()` helper |
 | `bin/cli.js` | The extracted Claude Code bundle (16 MB) |
 | `scripts/extract.py` | Carves `cli.js` out of a Claude Code standalone binary |
+| `scripts/test-workers.mjs` | Worker tests: concurrent isolation + GC, session persistence, no-orphan cancel |
 | `vercel.json` | `bunVersion: 1.x`, `fluid: true` (per-route `maxDuration` is in `route.ts`) |
-| `next.config.ts` | `serverExternalPackages` (SDK) + `outputFileTracingIncludes` (bundles `bin/**`) |
-| `local.mjs` | Run the same agent pipeline from the CLI (no UI) |
+| `next.config.ts` | `serverExternalPackages` + `outputFileTracingIncludes` (ships `bin/**` + `lib/**`) |
+| `local.mjs` | Run the agent pipeline from the CLI directly (no Worker, no UI) — a debug baseline |
 | `deploy.sh` | Deploy via `vc`, passing `.env` secrets as runtime env |
 
 ## Where `bin/cli.js` comes from
