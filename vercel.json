@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "bunVersion": "1.x",
+  "fluid": true,
+  "functions": {
+    "api/agent.mjs": {
+      "maxDuration": 300,
+      "includeFiles": "bin/**"
+    }
+  }
+}
