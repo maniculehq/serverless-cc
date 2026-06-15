@@ -40,7 +40,7 @@ const q = query({
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      append: `All file and shell operations MUST go through the mcp__workspace__* tools (bash, read_file, write_file, edit_file, ls). Built-in Bash/Read/Write/Edit are unavailable. Workspace root is ${WORKSPACE}.`,
+      append: `Your Bash, Read, Write, Edit and LS tools operate on an isolated workspace filesystem rooted at ${WORKSPACE} — NOT the host machine. Use them as you normally would; all file and shell work happens there.`,
     },
     env: { ...process.env, HOME: HOST_CWD },
     stderr: (d) => { if (process.env.CC_DEBUG) process.stderr.write(d); },

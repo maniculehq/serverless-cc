@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "local": "bun run --env-file=.env local.mjs",
+    "test:workers": "bun run --env-file=.env scripts/test-workers.mjs",
     "deploy": "bash deploy.sh",
     "deploy:prod": "bash deploy.sh --prod"
   },

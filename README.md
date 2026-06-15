@@ -10,17 +10,20 @@ Browser UI (app/page.tsx + components/chat.tsx — AI Elements, no AI SDK)
         │  POST /api/agent {prompt}              ▲  NDJSON event stream
         ▼                                        │  (text/reasoning deltas, tool calls)
    app/api/agent/route.ts — App Router handler, runs on the BUN runtime (vercel.json bunVersion)
-        │
+        │  runAgentWorker()  (one per request)
+        ▼
+   lib/agent-worker.mjs — a node:worker_threads Worker (own JS VM + per-request workspace)
+        │                        postMessage({t:...}) events ▲
    Agent SDK  ──spawns──▶  bin/cli.js (extracted Claude Code)   built-in tools DISABLED
         │                        │
         │  control protocol      ▼ tool calls
         └───────────────▶ mcp__workspace__{bash,read_file,write_file,edit_file,ls}
-                                 │  (run in the function process)
+                                 │  (run in the WORKER process)
                                  ▼
-                         one just-bash instance
+                         per-request just-bash instance
                                  │
                                  ▼
-                         DiskFs ──HTTPS──▶ Archil disk (persistent)
+                         DiskFs ──HTTPS──▶ Archil disk  /workspace/<reqId>/…
 ```
 
 The backend lives **inside Next.js** as an App Router route handler (not a root `/api`
@@ -32,9 +35,33 @@ the deltas — **no Vercel AI SDK / `useChat`** (AI Elements are used purely as 
 components; `includePartialMessages: true` gives token-level streaming).
 
 The bundle's own `Bash`/`Read`/`Write`/`Edit`/`Glob`/`Grep` are disabled; the model
-uses custom MCP tools instead, all backed by a single `just-bash` instance whose
-filesystem is the Archil disk (`DiskFs`, via the pure-HTTPS `disk` SDK). If
-`ARCHIL_API_KEY` is unset it falls back to an in-memory fs (handy for local dev).
+uses custom MCP tools instead, all backed by a `just-bash` instance whose filesystem is the
+Archil disk (`DiskFs`, via the pure-HTTPS `disk` SDK). If `ARCHIL_API_KEY` is unset it
+falls back to an in-memory fs (handy for local dev).
+
+### Worker isolation per request
+
+Vercel Fluid Compute serves **multiple concurrent invocations from one warm instance**, so
+module-level singletons (one shared `just-bash`, one `/workspace`) would be shared across
+requests. Each `POST` therefore runs in its **own `node:worker_threads` Worker**
+(`lib/agent-worker.mjs`, spawned by `lib/agent-runner.mjs`), which buys three things:
+
+- **Compute isolation** — each Worker is its own JavaScriptCore VM + memory arena + event
+  loop, so the `fs-backend`/`mcp-tools` module state is naturally per-request.
+- **Data isolation** — the worker scopes the workspace to a unique prefix
+  (`CC_WORKSPACE=/workspace/<reqId>`) before importing `fs-backend`, so concurrent runs on
+  the same Archil disk never collide. Pass `{ "session": "<id>" }` in the POST body to
+  deliberately share/persist a workspace instead.
+- **Hard cancellation** — on client disconnect or the `maxDuration` deadline the route calls
+  `cancel()`, which posts `{__cmd:"abort"}` to the worker; the worker aborts the SDK's
+  `AbortController` *from inside the live thread* (stdin-EOF → SIGTERM → SIGKILL), reliably
+  reaping the `cli.js` child. (`worker.terminate()` alone **orphans** the child — verified —
+  so it's only used as a backstop after the child is already dead.)
+
+Why not `node:vm`? A `vm` context shares the host heap/event-loop/builtins, isn't a sandbox,
+and its `timeout` only bounds *synchronous* code — it can't cancel an async agent run. A
+Worker is the primitive that actually isolates and can be killed. `scripts/test-workers.mjs`
+exercises both properties (concurrent on-disk isolation + no-orphan cancellation).
 
 ## Layout
 
