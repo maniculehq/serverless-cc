@@ -61,7 +61,7 @@ var o=null;try{o=JSON.parse(dm[1]);}catch(e){}
 if(o){
 if(o.type==="content_block_start"&&o.content_block&&o.content_block.type==="tool_use"&&o.content_block.name==="ToolSearch"){tsIdx[o.index]="";ctrl.enqueue(enc.encode(evt));return;}
 if(o.type==="content_block_delta"&&o.delta&&o.delta.type==="input_json_delta"&&(o.index in tsIdx)){tsIdx[o.index]+=(o.delta.partial_json||"");return;}
-if(o.type==="content_block_stop"&&(o.index in tsIdx)){var full=fixSelect(tsIdx[o.index]);delete tsIdx[o.index];ctrl.enqueue(enc.encode("event: content_block_delta\\ndata: "+JSON.stringify({type:"content_block_delta",index:o.index,delta:{type:"input_json_delta",partial_json:full}})+"\\n\\n"));ctrl.enqueue(enc.encode(evt));if(DBG)console.error("[ws-rename] toolsearch select ->",full);return;}
+if(o.type==="content_block_stop"&&(o.index in tsIdx)){var raw=tsIdx[o.index];var full=fixSelect(raw);delete tsIdx[o.index];ctrl.enqueue(enc.encode("event: content_block_delta\\ndata: "+JSON.stringify({type:"content_block_delta",index:o.index,delta:{type:"input_json_delta",partial_json:full}})+"\\n\\n"));ctrl.enqueue(enc.encode(evt));if(DBG)console.error("[ws-rename] toolsearch raw:",raw,"-> fixed:",full);return;}
 }
 ctrl.enqueue(enc.encode(fixName(evt)));
 };
