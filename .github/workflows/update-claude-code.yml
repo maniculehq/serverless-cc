@@ -1,0 +1,102 @@
+name: Update Claude Code bundle
+
+# Once a day, check npm for a newer Claude Code release. If
+# @anthropic-ai/claude-code@latest is ahead of the version we ship in
+# bin/cli.js (tracked in bin/cli.js.version), download the Linux x64 standalone
+# binary, re-carve bin/cli.js out of it (scripts/extract.py), re-apply the
+# workspace tool-rename shim (scripts/patch-cli.mjs), and push to main.
+#
+# Runs on ubuntu-latest (linux x64), which is why we fetch the linux-x64 binary —
+# extract.py is format-agnostic but the carved bundle must match the runner that
+# smoke-tests it here. The carved cli.js itself runs on any stock Bun.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC daily
+  workflow_dispatch: {} # allow manual runs
+
+# Needed so the job can push the bumped bundle back to main.
+permissions:
+  contents: write
+
+# Never let two updater runs race on a push to main.
+concurrency:
+  group: update-claude-code
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check npm for a newer version
+        id: check
+        run: |
+          set -euo pipefail
+          latest="$(npm view @anthropic-ai/claude-code version)"
+          current="$(cat bin/cli.js.version 2>/dev/null || echo none)"
+          echo "latest=$latest"   >> "$GITHUB_OUTPUT"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          if [ "$latest" != "$current" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Claude Code $latest available (bundle is $current) — extracting."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Bundle already on $current — nothing to do."
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.changed == 'true'
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.changed == 'true'
+        with:
+          node-version: "20"
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.check.outputs.changed == 'true'
+
+      - name: Extract + patch bin/cli.js
+        if: steps.check.outputs.changed == 'true'
+        env:
+          LATEST: ${{ steps.check.outputs.latest }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/cc"
+          mkdir -p "$work"
+          # Download the Linux x64 standalone binary for this exact version (the
+          # platform binary lives in a separate package from the launcher).
+          ( cd "$work" && npm pack "@anthropic-ai/claude-code-linux-x64@${LATEST}" )
+          tar xzf "$work"/*.tgz -C "$work"
+          # Carve cli.js out of the standalone binary, then re-apply the shim.
+          python3 scripts/extract.py "$work/package/claude" bin
+          node scripts/patch-cli.mjs
+          printf '%s\n' "$LATEST" > bin/cli.js.version
+          # Safety gate: only proceed if the patched bundle actually runs on a
+          # stock Bun and self-reports the version we just installed.
+          got="$(timeout 60 bun bin/cli.js --version | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')"
+          if [ "$got" != "$LATEST" ]; then
+            echo "::error::patched bundle reports '$got', expected '$LATEST' — not committing."
+            exit 1
+          fi
+          echo "::notice::bin/cli.js is now Claude Code $got"
+
+      - name: Commit + push to main
+        if: steps.check.outputs.changed == 'true'
+        env:
+          LATEST: ${{ steps.check.outputs.latest }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bin/cli.js bin/cli.js.version
+          if git diff --cached --quiet; then
+            echo "::notice::extraction produced no changes — skipping commit."
+            exit 0
+          fi
+          git commit -m "chore(cli): bump extracted Claude Code bundle to ${LATEST}" \
+                     -m "Automated: @anthropic-ai/claude-code@${LATEST} (linux-x64) re-extracted via scripts/extract.py and re-patched."
+          git push origin HEAD:main

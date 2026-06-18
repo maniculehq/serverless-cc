@@ -118,7 +118,14 @@ Regenerate it from a binary (e.g. to bump the Claude Code version):
 ```bash
 python3 scripts/extract.py /path/to/claude-code-binary bin
 # writes bin/cli.js and prints: bun 1.3.14 (…), cli_len 16814932, cli_sha …
+node scripts/patch-cli.mjs   # re-applies the workspace tool-rename shim
 ```
+
+This is automated: **`.github/workflows/update-claude-code.yml`** runs daily,
+compares `@anthropic-ai/claude-code@latest` on npm against `bin/cli.js.version`,
+and — when there's a new release — downloads the Linux x64 standalone binary,
+re-runs the two steps above, smoke-tests the result, and pushes the bumped
+`bin/cli.js` to `main`.
 
 ## Setup
 
