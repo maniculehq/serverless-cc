@@ -78,15 +78,33 @@ if(DBG)console.error("[ws-rename] fetch shim installed");
 }catch(e){}})();
 `;
 
+// Remove a previously-injected shim (any version) so patching is RE-APPLIABLE:
+// re-running always installs the CURRENT shim instead of silently no-op'ing on
+// the marker. The shim spans MARKER … TERM (the unique outer-IIFE terminator),
+// and we also swallow the one newline we inserted on each side.
+const TERM = "}catch(e){}})();";
+function stripExisting(src) {
+  const a = src.indexOf(MARKER);
+  if (a === -1) return src;
+  const t = src.indexOf(TERM, a);
+  if (t === -1) return src; // marker without terminator — leave as-is, don't corrupt
+  const end = t + TERM.length;
+  const lo = src[a - 1] === "\n" ? a - 1 : a;
+  const hi = src[end] === "\n" ? end + 1 : end;
+  return src.slice(0, lo) + src.slice(hi);
+}
+
 function main() {
   if (!fs.existsSync(CLI)) {
     console.error(`patch-cli: not found: ${CLI}`);
     process.exit(1);
   }
-  const src = fs.readFileSync(CLI, "utf8");
+  let src = fs.readFileSync(CLI, "utf8");
+  const had = src.includes(MARKER);
+  src = stripExisting(src);
   if (src.includes(MARKER)) {
-    console.log(`patch-cli: already patched (${CLI})`);
-    return;
+    console.error("patch-cli: could not strip the existing shim (terminator not found); aborting.");
+    process.exit(3);
   }
   // Inject as the first statement inside the CJS wrapper, keeping the Bun
   // directive line (`// @bun @bytecode @bun-cjs`) and module structure intact.
@@ -99,7 +117,7 @@ function main() {
   const insertAt = at + anchor.length;
   const patched = src.slice(0, insertAt) + "\n" + SHIM + "\n" + src.slice(insertAt);
   fs.writeFileSync(CLI, patched);
-  console.log(`patch-cli: injected fetch shim into ${CLI} (+${patched.length - src.length} bytes)`);
+  console.log(`patch-cli: ${had ? "re-injected" : "injected"} fetch shim into ${CLI}`);
 }
 
 main();
