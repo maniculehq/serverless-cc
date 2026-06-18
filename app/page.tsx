@@ -1,8 +1,16 @@
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { Chat } from "@/components/chat";
 import { StatusPill } from "@/components/status-pill";
+import { UserMenu } from "@/components/user-menu";
 import { WarningBanner } from "@/components/warning-banner";
+import { auth } from "@/lib/auth";
 
-export default function Home() {
+export default async function Home() {
+  // Validated, server-side auth gate (the middleware redirect is only optimistic).
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) redirect("/sign-in");
+
   return (
     <div className="relative flex h-dvh flex-col">
       <header className="flex shrink-0 items-center justify-between gap-4 border-border/70 border-b px-5 py-3 sm:px-7">
@@ -19,7 +27,10 @@ export default function Home() {
             </p>
           </div>
         </div>
-        <StatusPill />
+        <div className="flex items-center gap-3">
+          <StatusPill />
+          <UserMenu user={session.user} />
+        </div>
       </header>
       <WarningBanner />
       <main className="min-h-0 flex-1">

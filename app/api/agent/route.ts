@@ -20,6 +20,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { auth } from "@/lib/auth";
 import "../../../lib/mcp-tools.mjs"; // tracing anchor only (SDK / just-bash / disk)
 
 export const runtime = "nodejs"; // becomes Bun on Vercel via vercel.json bunVersion
@@ -42,7 +43,18 @@ function runner() {
   return _runner;
 }
 
-export async function GET() {
+// This is a private, single-tenant app: every endpoint requires a valid,
+// DB-validated GitHub session. Returns 401 JSON (not an HTML redirect) so the
+// client `fetch` callers handle it cleanly.
+async function unauthorized(request: Request) {
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (session) return null;
+  return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
+}
+
+export async function GET(request: Request) {
+  const denied = await unauthorized(request);
+  if (denied) return denied;
   try {
     const { ensureBunOnPath, diag } = await runner();
     ensureBunOnPath();
@@ -64,6 +76,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = await unauthorized(request);
+  if (denied) return denied;
+
   let body: { prompt?: string; session?: string } = {};
   try { body = await request.json(); } catch {}
   const prompt = body?.prompt;

@@ -10,7 +10,12 @@ const nextConfig: NextConfig = {
   // chunk it would be absent from node_modules, and the runtime import would
   // fail to resolve it. Keeping it external leaves it in node_modules where the
   // file tracer (anchored by route.ts's static mcp-tools import) picks it up.
-  serverExternalPackages: ["@anthropic-ai/claude-agent-sdk", "just-bash", "disk", "zod"],
+  // `better-auth` + `pg` back the auth layer (lib/auth.ts), imported by both the
+  // auth route and the agent route. Kept external because `pg` dynamically
+  // requires optional native/runtime modules (pg-native, pg-cloudflare) the
+  // bundler mishandles, and to keep better-auth's many subpath exports out of the
+  // route chunks — they're traced from node_modules instead.
+  serverExternalPackages: ["@anthropic-ai/claude-agent-sdk", "just-bash", "disk", "zod", "better-auth", "pg"],
 
   // Files loaded at runtime via process.cwd() (dynamic paths the file tracer
   // can't see) must be forced into the route handler's deployment bundle:
