@@ -23,7 +23,7 @@ Browser UI (app/page.tsx + components/chat.tsx — AI Elements, no AI SDK)
                          per-request just-bash instance
                                  │
                                  ▼
-                         DiskFs ──HTTPS──▶ Archil disk  /workspace/<reqId>/…
+                         DiskFs ──HTTPS──▶ this USER's Archil disk (cc-u-<hash>)  /workspace/…
 ```
 
 The backend lives **inside Next.js** as an App Router route handler (not a root `/api`
@@ -48,12 +48,14 @@ requests. Each `POST` therefore runs in its **own `node:worker_threads` Worker**
 
 - **Compute isolation** — each Worker is its own JavaScriptCore VM + memory arena + event
   loop, so the `fs-backend`/`mcp-tools` module state is naturally per-request.
-- **Data isolation** — the worker scopes the workspace to a unique prefix
-  (`CC_WORKSPACE=/workspace/<reqId>`) before importing `fs-backend`, so concurrent runs on
-  the same Archil disk never collide. A request without a session is **ephemeral**: its
-  prefix is deleted when the run ends, so per-request workspaces don't accumulate on the
-  disk. Pass `{ "session": "<id>" }` in the POST body to deliberately share/persist a
-  workspace instead (those are never GC'd).
+- **Data isolation** — every signed-in user gets their **own Archil disk**, auto-provisioned
+  on first use and named `cc-u-<hash of the Better Auth user id>` (`lib/user-disk.mjs`). The
+  route resolves the user's disk id on the main thread and hands it to the worker via
+  `CC_DISK_ID` (set before importing `fs-backend`), which binds `DiskFs` to that disk. So
+  cross-user isolation is at the **disk** level, and each user's `/workspace` is **persistent**
+  — files survive across prompts and sessions. (When no per-user disk is bound — the local CLI
+  or `scripts/test-workers.mjs` falling back to the shared `ARCHIL_DISK` — the worker keeps the
+  old per-request `/workspace/<reqId>` prefix and GCs it when the run ends.)
 - **Hard cancellation** — on client disconnect or the `maxDuration` deadline the route calls
   `cancel()`, which posts `{__cmd:"abort"}` to the worker; the worker aborts the SDK's
   `AbortController` *from inside the live thread* (stdin-EOF → SIGTERM → SIGKILL), reliably
@@ -78,12 +80,14 @@ exercises both properties (concurrent on-disk isolation + no-orphan cancellation
 | `lib/agent-worker.mjs` | The per-request Worker: runs `query()`, scopes the workspace, streams events, cancels + GC's |
 | `lib/agent-runner.mjs` | Main-thread glue: spawns the Worker, abort-then-terminate cancel, concurrency cap |
 | `lib/mcp-tools.mjs` | The `mcp__workspace__*` tools (Bash/Read/Write/Edit/LS — drop-in for the native tools) |
-| `lib/fs-backend.mjs` | The per-worker `just-bash` instance; `DiskFs` (Archil) or `InMemoryFs` |
+| `lib/fs-backend.mjs` | The per-worker `just-bash` instance; binds the user's disk via `CC_DISK_ID` (else shared `ARCHIL_DISK`), or `InMemoryFs` |
+| `lib/user-disk.mjs` | Per-user disk provisioning: deterministic naming, idempotent create-or-get + wait, in-flight cache, cleanup |
 | `lib/disk-fs.mjs` | just-bash `IFileSystem` over the Archil `disk` SDK object ops |
 | `lib/utils.ts` | shadcn `cn()` helper |
 | `bin/cli.js` | The extracted Claude Code bundle (16 MB) |
 | `scripts/extract.py` | Carves `cli.js` out of a Claude Code standalone binary |
 | `scripts/test-workers.mjs` | Worker tests: concurrent isolation + GC, session persistence, no-orphan cancel |
+| `scripts/prune-disks.mjs` | Reconciler: deletes orphan `cc-u-*` disks with no live user (backstop for the auth delete hook) |
 | `vercel.json` | `bunVersion: 1.x`, `fluid: true` (per-route `maxDuration` is in `route.ts`) |
 | `next.config.ts` | `serverExternalPackages` + `outputFileTracingIncludes` (ships `bin/**` + `lib/**`) |
 | `local.mjs` | Run the agent pipeline from the CLI directly (no Worker, no UI) — a debug baseline |
@@ -135,8 +139,10 @@ cp .env.example .env   # fill in ARCHIL_* and ANTHROPIC_API_KEY
 ```
 
 `.env` is git-ignored. Required vars (see `.env.example`): `ARCHIL_API_KEY`
-(account `key-…`, not a disk `adt_…` token), `ARCHIL_REGION`, `ARCHIL_DISK`
-(`account/disk`), and `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`).
+(account `key-…`, not a disk `adt_…` token), `ARCHIL_REGION`, and `ANTHROPIC_API_KEY`
+(or `CLAUDE_CODE_OAUTH_TOKEN`). `ARCHIL_DISK` (`account/disk`) is **optional** — each
+signed-in user gets their own auto-provisioned disk; the shared disk is only a fallback
+for the local CLI and `scripts/test-workers.mjs`.
 
 ## Run locally
 

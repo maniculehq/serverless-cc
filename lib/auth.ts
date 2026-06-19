@@ -25,6 +25,7 @@ import { betterAuth } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { Pool, type PoolConfig } from "pg";
 import { env } from "@/lib/env";
+import { getUserDiskId, deleteUserDisk } from "@/lib/user-disk.mjs";
 
 // PlanetScale's connection string carries libpq's `sslrootcert=system` ("use the
 // OS trust store"), but node-postgres' parser (pg-connection-string) doesn't
@@ -48,6 +49,27 @@ export const auth = betterAuth({
     github: {
       clientId: env.GITHUB_CLIENT_ID,
       clientSecret: env.GITHUB_CLIENT_SECRET,
+    },
+  },
+  // Per-user Archil disk lifecycle (see lib/user-disk.mjs). Both hooks are
+  // best-effort and never block the auth operation: a provisioning miss is
+  // retried on the user's first /api/agent request; a cleanup miss is reconciled
+  // by scripts/prune-disks.mjs.
+  databaseHooks: {
+    user: {
+      // Eagerly provision on signup so the disk is "available" before the first
+      // prompt (removes the first-request wait). Fire-and-forget.
+      create: {
+        after: async (user) => {
+          void getUserDiskId(user.id).catch(() => {});
+        },
+      },
+      // Delete the user's disk so it doesn't accrue cost after the account is gone.
+      delete: {
+        after: async (user) => {
+          await deleteUserDisk(user.id).catch(() => {});
+        },
+      },
     },
   },
   // nextCookies() must be the LAST plugin: it forwards Set-Cookie headers from

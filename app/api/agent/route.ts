@@ -21,6 +21,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { auth } from "@/lib/auth";
+import { getUserDiskId, DiskNotReadyError, DiskProvisionError } from "../../../lib/user-disk.mjs";
 import "../../../lib/mcp-tools.mjs"; // tracing anchor only (SDK / just-bash / disk)
 
 export const runtime = "nodejs"; // becomes Bun on Vercel via vercel.json bunVersion
@@ -44,17 +45,18 @@ function runner() {
 }
 
 // This is a private, single-tenant app: every endpoint requires a valid,
-// DB-validated GitHub session. Returns 401 JSON (not an HTML redirect) so the
-// client `fetch` callers handle it cleanly.
-async function unauthorized(request: Request) {
+// DB-validated GitHub session. Resolves to the authenticated user id, or a 401
+// JSON Response (not an HTML redirect) so client `fetch` callers handle it cleanly.
+// One getSession serves both the gate and the per-user disk lookup.
+async function requireUser(request: Request): Promise<{ userId: string } | Response> {
   const session = await auth.api.getSession({ headers: request.headers });
-  if (session) return null;
+  if (session?.user?.id) return { userId: session.user.id };
   return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
 }
 
 export async function GET(request: Request) {
-  const denied = await unauthorized(request);
-  if (denied) return denied;
+  const user = await requireUser(request);
+  if (user instanceof Response) return user;
   try {
     const { ensureBunOnPath, diag } = await runner();
     ensureBunOnPath();
@@ -76,8 +78,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const denied = await unauthorized(request);
-  if (denied) return denied;
+  const user = await requireUser(request);
+  if (user instanceof Response) return user;
 
   let body: { prompt?: string; session?: string } = {};
   try { body = await request.json(); } catch {}
@@ -85,7 +87,32 @@ export async function POST(request: Request) {
   if (!prompt || !prompt.trim()) {
     return Response.json({ ok: false, error: "missing 'prompt'" }, { status: 400 });
   }
+  // `session` is client-controlled but now only namespaces a sub-workspace WITHIN
+  // the caller's own disk (bound server-side from the auth id below), so it can't
+  // reach another user's data.
   const session = body?.session;
+
+  // Resolve (and, on first use, provision) this user's own Archil disk before
+  // committing a worker. Null in in-memory mode. Errors map to clean pre-stream
+  // HTTP responses (never mid-stream).
+  let diskId: string | null = null;
+  try {
+    diskId = await getUserDiskId(user.userId);
+  } catch (e: unknown) {
+    if (e instanceof DiskNotReadyError) {
+      return Response.json(
+        { ok: false, error: "disk provisioning, retry shortly" },
+        { status: 503, headers: { "retry-after": String(e.retryAfter) } },
+      );
+    }
+    if (e instanceof DiskProvisionError) {
+      return Response.json({ ok: false, error: e.message }, { status: e.httpStatus });
+    }
+    return Response.json(
+      { ok: false, error: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    );
+  }
 
   let runAgentWorker: typeof import("../../../lib/agent-runner.mjs").runAgentWorker;
   let atCapacity: typeof import("../../../lib/agent-runner.mjs").atCapacity;
@@ -115,7 +142,7 @@ export async function POST(request: Request) {
         try { controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n")); } catch {}
       };
 
-      const { done, cancel } = runAgentWorker({ prompt, session, onEvent: send });
+      const { done, cancel } = runAgentWorker({ prompt, session, diskId, onEvent: send });
       cancelRun = cancel;
 
       // Cancel on client disconnect or just before the function deadline, so the
