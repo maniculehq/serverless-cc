@@ -4,12 +4,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "fetch-cli": "bun scripts/fetch-cli.mjs",
+    "dev": "bun scripts/fetch-cli.mjs && next dev",
+    "build": "bun scripts/fetch-cli.mjs && next build",
     "start": "next start",
     "lint": "eslint",
-    "local": "bun run --env-file=.env local.mjs",
-    "test:workers": "bun run --env-file=.env scripts/test-workers.mjs",
+    "local": "bun scripts/fetch-cli.mjs && bun run --env-file=.env local.mjs",
+    "test:workers": "bun scripts/fetch-cli.mjs && bun run --env-file=.env scripts/test-workers.mjs",
     "deploy": "bash deploy.sh",
     "deploy:prod": "bash deploy.sh --prod"
   },

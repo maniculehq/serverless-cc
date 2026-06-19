@@ -1,21 +1,20 @@
 name: Update Claude Code bundle
 
 # Once a day, check npm for a newer Claude Code release. If
-# @anthropic-ai/claude-code@latest is ahead of the version we ship in
-# bin/cli.js (tracked in bin/cli.js.version), download the Linux x64 standalone
-# binary, re-carve bin/cli.js out of it (scripts/extract.py), re-apply the
-# workspace tool-rename shim (scripts/patch-cli.mjs), and push to main.
+# @anthropic-ai/claude-code@latest is ahead of the pinned version
+# (bin/cli.js.version), verify the new version still fetches + extracts + patches
+# + runs (scripts/fetch-cli.mjs), then bump ONLY the pin and push to main.
 #
-# Runs on ubuntu-latest (linux x64), which is why we fetch the linux-x64 binary —
-# extract.py is format-agnostic but the carved bundle must match the runner that
-# smoke-tests it here. The carved cli.js itself runs on any stock Bun.
+# bin/cli.js itself is NEVER committed — it's fetched and carved at build time
+# (scripts/fetch-cli.mjs, wired into `bun run build`). This job's job is just to
+# move the pin forward, with a smoke test guarding against a broken release.
 
 on:
   schedule:
     - cron: "0 6 * * *" # 06:00 UTC daily
   workflow_dispatch: {} # allow manual runs
 
-# Needed so the job can push the bumped bundle back to main.
+# Needed so the job can push the bumped pin back to main.
 permissions:
   contents: write
 
@@ -40,51 +39,34 @@ jobs:
           echo "current=$current" >> "$GITHUB_OUTPUT"
           if [ "$latest" != "$current" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Claude Code $latest available (bundle is $current) — extracting."
+            echo "::notice::Claude Code $latest available (pinned at $current) — verifying."
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Bundle already on $current — nothing to do."
+            echo "::notice::Pinned at $current — nothing to do."
           fi
-
-      - uses: actions/setup-python@v5
-        if: steps.check.outputs.changed == 'true'
-        with:
-          python-version: "3.12"
-
-      - uses: actions/setup-node@v4
-        if: steps.check.outputs.changed == 'true'
-        with:
-          node-version: "20"
 
       - uses: oven-sh/setup-bun@v2
         if: steps.check.outputs.changed == 'true'
 
-      - name: Extract + patch bin/cli.js
+      - name: Verify the new version fetches, extracts, patches, and runs
         if: steps.check.outputs.changed == 'true'
         env:
           LATEST: ${{ steps.check.outputs.latest }}
         run: |
           set -euo pipefail
-          work="$RUNNER_TEMP/cc"
-          mkdir -p "$work"
-          # Download the Linux x64 standalone binary for this exact version (the
-          # platform binary lives in a separate package from the launcher).
-          ( cd "$work" && npm pack "@anthropic-ai/claude-code-linux-x64@${LATEST}" )
-          tar xzf "$work"/*.tgz -C "$work"
-          # Carve cli.js out of the standalone binary, then re-apply the shim.
-          python3 scripts/extract.py "$work/package/claude" bin
-          node scripts/patch-cli.mjs
           printf '%s\n' "$LATEST" > bin/cli.js.version
-          # Safety gate: only proceed if the patched bundle actually runs on a
-          # stock Bun and self-reports the version we just installed.
+          # Fetch + carve + patch bin/cli.js (NOT committed — build-time artifact).
+          FORCE_FETCH_CLI=1 bun scripts/fetch-cli.mjs
+          # Safety gate: only bump the pin if the patched bundle actually runs on a
+          # stock Bun and self-reports the version we just pinned.
           got="$(timeout 60 bun bin/cli.js --version | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')"
           if [ "$got" != "$LATEST" ]; then
-            echo "::error::patched bundle reports '$got', expected '$LATEST' — not committing."
+            echo "::error::patched bundle reports '$got', expected '$LATEST' — not bumping the pin."
             exit 1
           fi
-          echo "::notice::bin/cli.js is now Claude Code $got"
+          echo "::notice::verified — Claude Code $got fetches and runs."
 
-      - name: Commit + push to main
+      - name: Commit + push the version bump to main
         if: steps.check.outputs.changed == 'true'
         env:
           LATEST: ${{ steps.check.outputs.latest }}
@@ -92,11 +74,12 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bin/cli.js bin/cli.js.version
+          # Only the pin is tracked; bin/cli.js is gitignored (build-time artifact).
+          git add bin/cli.js.version
           if git diff --cached --quiet; then
-            echo "::notice::extraction produced no changes — skipping commit."
+            echo "::notice::pin already at $LATEST — skipping commit."
             exit 0
           fi
-          git commit -m "chore(cli): bump extracted Claude Code bundle to ${LATEST}" \
-                     -m "Automated: @anthropic-ai/claude-code@${LATEST} (linux-x64) re-extracted via scripts/extract.py and re-patched."
+          git commit -m "chore(cli): pin Claude Code bundle to ${LATEST}" \
+                     -m "Automated: verified @anthropic-ai/claude-code@${LATEST} fetches + extracts + patches + runs (scripts/fetch-cli.mjs)."
           git push origin HEAD:main

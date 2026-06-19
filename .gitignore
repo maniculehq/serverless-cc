@@ -1,6 +1,11 @@
 # dependencies (bun install)
 node_modules
 
+# Claude Code bundle — fetched + extracted at build time (scripts/fetch-cli.mjs),
+# never committed. Only the pinned version (bin/cli.js.version) is tracked.
+bin/cli.js
+bin/.cli.js.built
+
 # next.js
 .next/
 /build

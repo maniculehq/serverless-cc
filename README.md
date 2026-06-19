@@ -87,8 +87,9 @@ exercises both properties (concurrent on-disk isolation + no-orphan cancellation
 | `lib/user-disk.mjs` | Per-user disk provisioning: deterministic naming, idempotent create-or-get + wait, in-flight cache, cleanup |
 | `lib/disk-fs.mjs` | just-bash `IFileSystem` over the Archil `disk` SDK object ops |
 | `lib/utils.ts` | shadcn `cn()` helper |
-| `bin/cli.js` | The extracted Claude Code bundle (16 MB) |
-| `scripts/extract.py` | Carves `cli.js` out of a Claude Code standalone binary |
+| `bin/cli.js.version` | The pinned Claude Code version (the only tracked `bin/` file; `bin/cli.js` is a git-ignored build artifact) |
+| `scripts/fetch-cli.mjs` | Build-time fetch + carve + patch of `bin/cli.js` from the pinned version (no Python) |
+| `scripts/extract.py` | Standalone debugging carve of `cli.js` from a local binary, with a full inventory |
 | `scripts/test-workers.mjs` | Worker tests: concurrent isolation + GC, session persistence, no-orphan cancel |
 | `scripts/prune-disks.mjs` | Reconciler: deletes orphan `cc-u-*` disks with no live user (backstop for the auth delete hook) |
 | `vercel.json` | `bunVersion: 1.x`, `fluid: true` (per-route `maxDuration` is in `route.ts`) |
@@ -98,12 +99,23 @@ exercises both properties (concurrent on-disk isolation + no-orphan cancellation
 
 ## Where `bin/cli.js` comes from
 
-Claude Code is distributed as a `bun build --compile` **standalone executable**
-(~250 MB) = the Bun runtime + an embedded payload. `scripts/extract.py` pulls the
-app out of that binary so it can run on a stock Bun (the heavy embedded runtime is
-discarded — `bin/cli.js` is only 16 MB).
+**`bin/cli.js` is never committed** — it's fetched and carved at **build time** and
+git-ignored. The only thing tracked is the pinned version in `bin/cli.js.version`.
+`bun run build` (and `dev` / `local` / `test:workers`) first runs
+**`scripts/fetch-cli.mjs`**, which:
 
-How it works:
+1. reads the pinned version from `bin/cli.js.version`,
+2. downloads the matching `@anthropic-ai/claude-code-linux-x64` standalone binary
+   (~250 MB) straight from the npm registry,
+3. carves the readable `cli.js` (~16 MB) out of it, and
+4. re-applies the workspace tool-rename shim (`scripts/patch-cli.mjs`).
+
+It's idempotent — it skips when `bin/cli.js` is already built from the pinned
+version (tracked via the git-ignored `bin/.cli.js.built` marker); force a rebuild
+with `FORCE_FETCH_CLI=1`.
+
+Why carving works (the binary is a `bun build --compile` standalone = the Bun
+runtime + an embedded payload):
 
 - A compiled Bun binary appends its payload after the real executable — inside the
   `__BUN,__bun` Mach-O segment on macOS, or tacked onto the end of the ELF on
@@ -111,28 +123,27 @@ How it works:
 - The payload's **entry point is a single CommonJS file** marked
   `// @bun @bytecode @bun-cjs`, and Bun stores it as **readable source** (the
   bytecode is a parallel cache a stock Bun ignores and recompiles from source).
-- So the script doesn't need to parse Bun's module table at all — it scans the
-  whole binary for the **largest contiguous run of printable bytes that begins with
-  `// @bun`** and carves that out as `cli.js`. It also prints an inventory (Bun
-  version, `$bunfs/root/*` assets, count of bundled modules, sha/offset/length).
-- That carved file is what the Agent SDK launches here: `bun bin/cli.js`. The five
-  native `.node` addons and the embedded ripgrep stay behind in the original binary
-  — they're unused because we disable the built-in tools and route everything to
-  just-bash instead.
+- So `fetch-cli.mjs` doesn't parse Bun's module table at all — it scans the binary
+  for the **largest contiguous run of printable bytes that begins with `// @bun`**
+  and carves that out as `cli.js`. The carved file runs on any stock Bun (the heavy
+  embedded runtime, the five native `.node` addons, and the embedded ripgrep all
+  stay behind — unused here since the built-in tools are disabled and everything is
+  routed to just-bash). The same readable source is carved on every platform, so
+  the `linux-x64` package is used everywhere.
 
-Regenerate it from a binary (e.g. to bump the Claude Code version):
+`scripts/extract.py` is the same carve as a standalone debugging tool — it takes a
+local binary path and prints a full inventory (Bun version, `$bunfs/root/*` assets,
+module count, sha/offset/length):
 
 ```bash
 python3 scripts/extract.py /path/to/claude-code-binary bin
-# writes bin/cli.js and prints: bun 1.3.14 (…), cli_len 16814932, cli_sha …
-node scripts/patch-cli.mjs   # re-applies the workspace tool-rename shim
 ```
 
-This is automated: **`.github/workflows/update-claude-code.yml`** runs daily,
-compares `@anthropic-ai/claude-code@latest` on npm against `bin/cli.js.version`,
-and — when there's a new release — downloads the Linux x64 standalone binary,
-re-runs the two steps above, smoke-tests the result, and pushes the bumped
-`bin/cli.js` to `main`.
+Version bumps are automated: **`.github/workflows/update-claude-code.yml`** runs
+daily, compares `@anthropic-ai/claude-code@latest` on npm against
+`bin/cli.js.version`, and — when there's a new release — runs `fetch-cli.mjs` to
+verify the new version fetches + extracts + patches + **runs**, then pushes a bump
+of just the **`bin/cli.js.version`** pin (never the binary).
 
 ## Setup
 
