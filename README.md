@@ -1,6 +1,7 @@
 # serverless-cc
 
-> **This project is for research and educational purposes only. Claude and Claude Code are exclusive property of Anthropic PBC and/or its affiliates.**
+> [!NOTE]
+> This project is for research and educational purposes only. Claude and Claude Code are exclusive property of Anthropic PBC and/or its affiliates.
 
 A **Next.js** app (chat UI built with **shadcn/ui** + **Vercel AI Elements**) that drives
 the **extracted Claude Code bundle** on **Vercel Fluid Compute (Bun runtime)**, with every
