@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Chat } from "@/components/chat";
 import { StatusPill } from "@/components/status-pill";
 import { UserMenu } from "@/components/user-menu";
-import { WarningBanner } from "@/components/warning-banner";
+import { DisclaimerBanner } from "@/components/disclaimer-banner";
 import { auth } from "@/lib/auth";
 
 export default async function Home() {
@@ -32,7 +32,7 @@ export default async function Home() {
           <UserMenu user={session.user} />
         </div>
       </header>
-      <WarningBanner />
+      <DisclaimerBanner />
       <main className="min-h-0 flex-1">
         <Chat />
       </main>
